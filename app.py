@@ -15,6 +15,7 @@ st.set_page_config(
 # ── Google Analytics 4 ───────────────────────────────────────────────────────
 GA_MEASUREMENT_ID = "G-F92P8BWS9F"
 
+
 components.html(f"""
 <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
 <script>
@@ -72,6 +73,7 @@ def add_stamp_to_pdf(input_path: str, output_path: str) -> bool:
         MARGIN = 8  # pts from right / bottom edge
 
         pdf = Pdf.open(input_path)
+        p=1
 
         for page in pdf.pages:
             mediabox = page.mediabox
