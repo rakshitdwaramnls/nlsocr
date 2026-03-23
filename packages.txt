@@ -1,3 +1,17 @@
 tesseract-ocr
 tesseract-ocr-all
 poppler-utils
+tesseract-ocr
+tesseract-ocr-eng
+tesseract-ocr-fra
+tesseract-ocr-deu
+tesseract-ocr-spa
+tesseract-ocr-ita
+tesseract-ocr-por
+tesseract-ocr-chi-sim
+tesseract-ocr-chi-tra
+tesseract-ocr-jpn
+tesseract-ocr-ara
+tesseract-ocr-hin
+ghostscript
+unpaper
