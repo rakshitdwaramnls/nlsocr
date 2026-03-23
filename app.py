@@ -595,14 +595,6 @@ if uploaded_file:
             prog_slot   = st.empty()
             status_slot = st.empty()
 
-            OCR_STEPS = [
-                (8,  "Analysing PDF structure…"),
-                (20, "Preprocessing pages…"),
-                (45, "Running Tesseract OCR engine…"),
-                (70, "Embedding invisible text layer…"),
-                (82, "Finalising OCR output…"),
-            ]
-
             def render_progress(pct: int, label: str):
                 prog_slot.markdown(f"""
                 <div class="prog-wrap">
@@ -620,53 +612,51 @@ if uploaded_file:
             start = time.time()
 
             try:
-                import threading
+                import traceback
 
-                ocr_done  = threading.Event()
-                ocr_error = [None]
+                # ── Step 1: analyse ───────────────────────────────────────
+                render_progress(15, "Analysing PDF structure…")
 
-                def run_ocr():
-                    try:
-                        # Build kwargs — avoid options that blow up file size
-                        kwargs = dict(
-                            language=language,
-                            # optimize=1 only helps when jbig2/pngquant are present;
-                            # on Streamlit Cloud they are absent so skip it to avoid
-                            # triggering the "output is Nx larger" warning path.
-                            optimize=0,
-                            progress_bar=False,
-                            deskew=deskew,
-                        )
-                        if ocr_mode == "force":
-                            kwargs["force_ocr"] = True
-                        else:
-                            # skip_text: only OCR pages that have no existing text layer
-                            # This is the key fix — avoids re-encoding image pages unnecessarily
-                            kwargs["skip_text"] = True
+                # ── Build kwargs ──────────────────────────────────────────
+                # optimize=0  → skip image recompression (jbig2/pngquant absent on Cloud)
+                # force_ocr   → re-encode every page (use for fully scanned PDFs)
+                # skip_text   → only OCR pages without an existing text layer
+                #               NOTE: for a purely image PDF (no text layer at all)
+                #               skip_text still runs OCR — it only skips pages that
+                #               already have embedded text, which is correct behaviour.
+                kwargs = dict(
+                    language=language,
+                    optimize=0,
+                    progress_bar=False,
+                    deskew=deskew,
+                )
+                if ocr_mode == "force":
+                    kwargs["force_ocr"] = True
+                else:
+                    kwargs["skip_text"] = True
 
-                        ocrmypdf.ocr(input_path, ocr_path, **kwargs)
-                    except Exception as e:
-                        ocr_error[0] = e
-                    finally:
-                        ocr_done.set()
+                # ── Step 2: run OCR (blocking — no threads) ───────────────
+                # Threading / multiprocessing nesting causes silent failures on
+                # Streamlit Cloud. ocrmypdf manages its own worker pool internally;
+                # calling it synchronously here is correct and reliable.
+                render_progress(30, "Running Tesseract OCR engine…")
 
-                t = threading.Thread(target=run_ocr, daemon=True)
-                t.start()
+                ocrmypdf.ocr(input_path, ocr_path, **kwargs)
 
-                for pct, label in OCR_STEPS:
-                    if ocr_done.is_set():
-                        break
-                    render_progress(pct, label)
-                    ocr_done.wait(timeout=2.8)
+                # Verify output was actually produced
+                if not os.path.exists(ocr_path) or os.path.getsize(ocr_path) == 0:
+                    raise RuntimeError(
+                        "ocrmypdf produced no output file. "
+                        "This usually means Tesseract or Ghostscript is not installed "
+                        "on the server. Check that 'packages.txt' contains: "
+                        "tesseract-ocr, ghostscript, tesseract-ocr-eng"
+                    )
 
-                ocr_done.wait()
+                render_progress(75, "Embedding invisible text layer…")
 
-                if ocr_error[0]:
-                    raise ocr_error[0]
-
+                # ── Step 3: stamp ─────────────────────────────────────────
                 render_progress(88, "Stamping pages with attribution…")
                 stamped_ok = add_stamp_to_pdf(ocr_path, stamped_path)
-                time.sleep(0.2)
 
                 render_progress(100, "Complete ✓")
                 elapsed = round(time.time() - start, 1)
@@ -682,15 +672,14 @@ if uploaded_file:
                     if output_size_kb < 1024
                     else f"{output_size_kb/1024:.1f} MB"
                 )
-                ratio_str = (
-                    f"  ·  {ratio:.1f}× original size"
-                    if ratio > 1.15
-                    else f"  ·  {ratio:.0%} of original size"
+                ratio_note = (
+                    f"  ·  {ratio:.1f}× input size" if ratio > 1.15
+                    else f"  ·  {ratio:.0%} of input size"
                 )
                 stamp_note = "  ·  pages stamped ✓" if stamped_ok else ""
 
                 status_slot.success(
-                    f"✅  OCR complete in {elapsed}s  ·  {size_str}{ratio_str}{stamp_note}"
+                    f"✅  OCR complete in {elapsed}s  ·  {size_str}{ratio_note}{stamp_note}"
                 )
 
                 fire_ga_event("ocr_success", {
@@ -710,7 +699,7 @@ if uploaded_file:
                     mime="application/pdf",
                 )
 
-                # Auto-download
+                # Auto-download via JS blob URL
                 import base64
                 b64 = base64.b64encode(pdf_bytes).decode()
                 components.html(f"""
@@ -727,7 +716,7 @@ if uploaded_file:
                     setTimeout(function() {{
                       URL.revokeObjectURL(url);
                       document.body.removeChild(a);
-                    }}, 1000);
+                    }}, 1500);
                   }} catch(e) {{
                     console.warn('Auto-download failed:', e);
                   }}
@@ -741,8 +730,11 @@ if uploaded_file:
                 fire_ga_event("ocr_failed", {"reason": "encrypted_pdf"})
             except Exception as e:
                 prog_slot.empty()
+                tb = traceback.format_exc()
                 st.error(f"❌  OCR failed: {e}")
-                fire_ga_event("ocr_failed", {"reason": str(e)[:100]})
+                with st.expander("Show error details (helpful for debugging)"):
+                    st.code(tb, language="text")
+                fire_ga_event("ocr_failed", {"reason": str(e)[:120]})
 else:
     st.info("☝️  Upload a PDF above to get started.")
 
