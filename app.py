@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # ── Google Analytics 4 ───────────────────────────────────────────────────────
-GA_MEASUREMENT_ID = "G-XXXXXXXXXX"
+GA_MEASUREMENT_ID = "G-F92P8BWS9F"
 
 components.html(f"""
 <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
