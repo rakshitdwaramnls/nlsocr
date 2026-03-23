@@ -55,82 +55,43 @@ def fire_ga_event(event_name: str, params: dict = {}):
 
 def add_stamp_to_pdf(input_path: str, output_path: str) -> bool:
     """
-    Stamp 'Made OCR friendly by Rakshit Dwaram' at the bottom-right of every page.
-
-    Uses pikepdf ONLY — pikepdf is a hard dependency of ocrmypdf so it is
-    ALWAYS available on Streamlit Cloud and any environment where ocrmypdf runs.
-    No reportlab required.
+    Stamp the footer 'Made OCR friendly by Rakshit Dwaram' on every page.
+    Uses pypdf + reportlab. Falls back (copies file) if libraries are missing.
     """
     try:
-        import pikepdf
-        from pikepdf import Pdf, Dictionary, Name, Array
+        from pypdf import PdfReader, PdfWriter
+        from reportlab.pdfgen import canvas as rl_canvas
+        from reportlab.lib.colors import Color
+        import io
 
-        STAMP_TEXT = "Made OCR friendly by Rakshit Dwaram"
-        # Helvetica character width at 7 pt ≈ 4.2 pts per character (conservative)
-        TEXT_WIDTH_APPROX = len(STAMP_TEXT) * 4.2
-        FONT_SIZE = 7
-        MARGIN = 8  # pts from right / bottom edge
+        reader = PdfReader(input_path)
+        writer = PdfWriter()
+        stamp_text = "Made OCR friendly by Rakshit Dwaram"
 
-        pdf = Pdf.open(input_path)
+        for page in reader.pages:
+            pw = float(page.mediabox.width)
+            ph = float(page.mediabox.height)
 
-        for page in pdf.pages:
-            mediabox = page.mediabox
-            pw = float(mediabox[2])
+            packet = io.BytesIO()
+            c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
+            c.setFillColor(Color(0.23, 0.54, 0.25, alpha=0.6))
+            c.setFont("Helvetica", 7)
+            c.drawRightString(pw - 10, 6, stamp_text)
+            c.save()
+            packet.seek(0)
 
-            x = pw - TEXT_WIDTH_APPROX - MARGIN
-            y = 5.0
+            from pypdf import PdfReader as _PR
+            stamp_page = _PR(packet).pages[0]
+            page.merge_page(stamp_page)
+            writer.add_page(page)
 
-            # PDF content stream: save state, set green colour, draw text, restore
-            content = (
-                f"q "
-                f"BT "
-                f"/Stamp_F1 {FONT_SIZE} Tf "
-                f"0.23 0.54 0.25 rg "
-                f"{x:.2f} {y:.2f} Td "
-                f"({STAMP_TEXT}) Tj "
-                f"ET "
-                f"Q\n"
-            ).encode("latin-1")
-
-            # ── Ensure /Resources/Font contains our font ──────────────────
-            if "/Resources" not in page:
-                page["/Resources"] = Dictionary()
-
-            res = page["/Resources"]
-
-            if "/Font" not in res:
-                res["/Font"] = Dictionary()
-
-            fonts = res["/Font"]
-
-            if "/Stamp_F1" not in fonts:
-                fonts["/Stamp_F1"] = Dictionary(
-                    Type=Name("/Font"),
-                    Subtype=Name("/Type1"),
-                    BaseFont=Name("/Helvetica"),
-                    Encoding=Name("/WinAnsiEncoding"),
-                )
-
-            # ── Append stamp stream to page contents ─────────────────────
-            stamp_stream = pdf.make_stream(content)
-
-            if "/Contents" in page:
-                existing = page["/Contents"]
-                if isinstance(existing, pikepdf.Array):
-                    existing.append(stamp_stream)
-                    page["/Contents"] = existing
-                else:
-                    page["/Contents"] = Array([existing, stamp_stream])
-            else:
-                page["/Contents"] = stamp_stream
-
-        pdf.save(output_path)
+        with open(output_path, "wb") as f:
+            writer.write(f)
         return True
 
-    except Exception as e:
+    except Exception:
         import shutil
         shutil.copy(input_path, output_path)
-        st.warning(f"Stamping skipped ({e}). PDF is still fully OCR'd.")
         return False
 
 
@@ -141,7 +102,7 @@ st.markdown("""
 
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
-/* ── App background: light warm cream ── */
+/* ── Light warm cream background ── */
 .stApp {
     background-color: #f5f2ed;
     background-image:
@@ -153,15 +114,6 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     min-height: 100vh;
 }
 
-/* ── Force all Streamlit block/section containers to be transparent ── */
-section[data-testid="stMain"],
-.stMainBlockContainer,
-div[data-testid="stVerticalBlock"],
-div[data-testid="stHorizontalBlock"],
-div[data-testid="column"] {
-    background: transparent !important;
-}
-
 #MainMenu, footer, header { visibility: hidden; }
 
 .section-divider {
@@ -170,10 +122,7 @@ div[data-testid="column"] {
     margin: 2.5rem 0;
 }
 
-/* ── All generic text ── */
-p, span, div, li { color: #1a2015; }
-
-/* ── Hero ── */
+/* Hero */
 .hero-wrap { padding: 2.5rem 0 1rem 0; }
 .hero-eyebrow {
     font-family: 'Space Mono', monospace;
@@ -200,107 +149,17 @@ p, span, div, li { color: #1a2015; }
     line-height: 1.6;
 }
 
-/* ══════════════════════════════════════════════
-   FILE UPLOADER — override dark inner drag zone
-   ══════════════════════════════════════════════ */
+/* Upload */
 [data-testid="stFileUploader"] {
-    background: #eef5e8 !important;
-    border: 1.5px dashed #a8c8a0 !important;
-    border-radius: 10px !important;
-    padding: 1.2rem !important;
+    background: #eef5e8;
+    border: 1.5px dashed #a8c8a0;
+    border-radius: 10px;
+    padding: 1.2rem;
     transition: border-color 0.25s;
 }
-[data-testid="stFileUploader"]:hover { border-color: #3a8a40 !important; }
+[data-testid="stFileUploader"]:hover { border-color: #3a8a40; }
 
-/* The inner dark drag-drop box */
-[data-testid="stFileUploaderDropzone"] {
-    background: #ffffff !important;
-    border: 1.5px dashed #b8d4b0 !important;
-    border-radius: 8px !important;
-}
-[data-testid="stFileUploaderDropzone"]:hover {
-    background: #f0f9eb !important;
-    border-color: #3a8a40 !important;
-}
-
-/* Text inside the dropzone */
-[data-testid="stFileUploaderDropzone"] span,
-[data-testid="stFileUploaderDropzone"] p,
-[data-testid="stFileUploaderDropzone"] small {
-    color: #3a5e40 !important;
-}
-
-/* "Browse files" button inside uploader */
-[data-testid="stFileUploaderDropzone"] button {
-    background: #3a8a40 !important;
-    color: #ffffff !important;
-    border: none !important;
-    border-radius: 6px !important;
-    font-family: 'Space Mono', monospace !important;
-    font-size: 0.75rem !important;
-    font-weight: 700 !important;
-}
-
-/* Uploaded file name row */
-[data-testid="stFileUploaderFile"],
-[data-testid="stFileUploaderFileName"] {
-    color: #1a2015 !important;
-    background: transparent !important;
-}
-
-/* ══════════════════════════════════════════════
-   SELECTBOX — override dark background
-   ══════════════════════════════════════════════ */
-div[data-baseweb="select"] > div,
-div[data-baseweb="select"] span {
-    background-color: #ffffff !important;
-    color: #1a2015 !important;
-    border-color: #b8d4b0 !important;
-    border-radius: 8px !important;
-}
-div[data-baseweb="select"] svg { fill: #3a8a40 !important; }
-
-/* Selectbox dropdown menu */
-ul[data-testid="stSelectboxVirtualDropdown"],
-div[data-baseweb="popover"] ul,
-div[data-baseweb="menu"] {
-    background: #ffffff !important;
-    border: 1px solid #b8d4b0 !important;
-    border-radius: 8px !important;
-}
-div[data-baseweb="menu"] li,
-div[data-baseweb="menu"] [role="option"] {
-    background: #ffffff !important;
-    color: #1a2015 !important;
-}
-div[data-baseweb="menu"] li:hover,
-div[data-baseweb="menu"] [role="option"]:hover,
-div[data-baseweb="menu"] [aria-selected="true"] {
-    background: #eef5e8 !important;
-    color: #1a2015 !important;
-}
-
-/* ══════════════════════════════════════════════
-   CHECKBOX — fix label visibility
-   ══════════════════════════════════════════════ */
-label, .stCheckbox label p, [data-testid="stCheckbox"] label {
-    color: #1a2015 !important;
-    font-size: 0.88rem !important;
-}
-[data-testid="stCheckbox"] span[data-testid="stMarkdownContainer"] p {
-    color: #1a2015 !important;
-}
-/* Checkbox box itself */
-[data-baseweb="checkbox"] div {
-    background-color: #ffffff !important;
-    border-color: #3a8a40 !important;
-}
-[data-baseweb="checkbox"] input:checked + div {
-    background-color: #3a8a40 !important;
-    border-color: #3a8a40 !important;
-}
-
-/* ── Options card ── */
+/* Options card */
 .options-card {
     background: #eef5e8;
     border: 1px solid #b8d4b0;
@@ -317,15 +176,9 @@ label, .stCheckbox label p, [data-testid="stCheckbox"] label {
     margin-bottom: 1rem;
 }
 
-/* ── Selectbox widget label (above the box) ── */
-[data-testid="stSelectbox"] label p,
-[data-testid="stSelectbox"] > label {
-    color: #1a2015 !important;
-    font-size: 0.88rem !important;
-    font-weight: 500 !important;
-}
+label { color: #4a5e48 !important; font-size: 0.88rem !important; }
 
-/* ── Buttons ── */
+/* Buttons */
 .stButton > button {
     background: #3a8a40 !important;
     color: #ffffff !important;
@@ -354,22 +207,8 @@ label, .stCheckbox label p, [data-testid="stCheckbox"] label {
 }
 .stDownloadButton > button:hover { background: #3a8a4015 !important; }
 
-/* ── Alerts ── */
-.stSuccess, .stError, .stInfo, .stWarning { border-radius: 8px !important; }
-[data-testid="stNotification"],
-[data-testid="stAlertContainer"] {
-    background: #eef5e8 !important;
-    color: #1a2015 !important;
-    border-radius: 8px !important;
-}
+.stSuccess, .stError, .stInfo { border-radius: 8px !important; }
 .stSpinner > div { color: #3a8a40 !important; }
-
-/* ── Info box ── */
-[data-testid="stInfoBanner"], div.stInfo {
-    background: #eef5e8 !important;
-    color: #1a2015 !important;
-    border-left-color: #3a8a40 !important;
-}
 
 /* ── Progress bar ── */
 .prog-wrap { margin: 1.2rem 0 0.5rem; }
@@ -398,12 +237,12 @@ label, .stCheckbox label p, [data-testid="stCheckbox"] label {
 .prog-step {
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
-    color: #5a8a60;
+    color: #8aaa85;
     letter-spacing: 1px;
     margin-top: 0.3rem;
 }
 
-/* ── Stamp notice ── */
+/* Stamp notice */
 .stamp-notice {
     background: #eef5e8;
     border: 1px solid #b8d4b0;
@@ -412,12 +251,12 @@ label, .stCheckbox label p, [data-testid="stCheckbox"] label {
     padding: 0.6rem 1rem;
     font-family: 'Space Mono', monospace;
     font-size: 0.62rem;
-    color: #2a5e35;
+    color: #4a7c59;
     letter-spacing: 1px;
     margin-bottom: 1rem;
 }
 
-/* ── About ── */
+/* About */
 .about-wrap { margin-top: 1rem; }
 .about-eyebrow {
     font-family: 'Space Mono', monospace;
@@ -450,19 +289,18 @@ label, .stCheckbox label p, [data-testid="stCheckbox"] label {
 }
 .about-body {
     font-size: 0.92rem;
-    color: #3a4e38;
+    color: #4a5e48;
     line-height: 1.85;
     font-weight: 300;
 }
 .about-body p { margin-bottom: 1rem; }
 .about-body p:last-child { margin-bottom: 0; }
-.about-highlight { color: #2a6e30; font-weight: 500; }
+.about-highlight { color: #2a6e30; font-weight: 400; }
 
-/* ── Footer ── */
 .footer-tag {
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
-    color: #7a9a80;
+    color: #a8c0a0;
     text-align: center;
     margin-top: 3rem;
     padding-bottom: 1.5rem;
@@ -545,23 +383,17 @@ with col1:
         }[x],
         index=0,
     )
-    deskew = st.checkbox(
-        "Auto-deskew pages",
-        value=False,
-        help="Straighten skewed/tilted scans. ⚠️ Increases output size — only enable if pages are visibly crooked.",
-    )
+    deskew = st.checkbox("Auto-deskew pages", value=True, help="Straighten skewed/tilted scans")
 
 with col2:
-    ocr_mode = st.selectbox(
-        "OCR Mode",
-        options=["skip_text", "force"],
-        format_func=lambda x: {
-            "skip_text": "Smart — skip pages with existing text (recommended)",
-            "force":     "Force — re-OCR every page (may increase file size)",
-        }[x],
-        index=0,
-        help="Smart mode is faster and keeps file sizes small. Force mode is only needed for PDFs with broken/incorrect text layers.",
+    optimize = st.selectbox(
+        "Output optimisation",
+        options=[0, 1, 2, 3],
+        format_func=lambda x: {0: "None", 1: "Balanced (recommended)", 2: "High", 3: "Maximum"}[x],
+        index=1,
     )
+    force_ocr = st.checkbox("Force OCR on all pages", value=True,
+                            help="Re-OCR every page, even if it already has a text layer")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -590,10 +422,17 @@ if uploaded_file:
             with open(input_path, "wb") as f:
                 f.write(uploaded_file.read())
 
-            input_size_kb = os.path.getsize(input_path) / 1024
-
+            # ── Progress bar placeholders ────────────────────────────────────
             prog_slot   = st.empty()
             status_slot = st.empty()
+
+            OCR_STEPS = [
+                (8,  "Analysing PDF structure…"),
+                (20, "Preprocessing pages…"),
+                (40, "Running Tesseract OCR engine…"),
+                (65, "Embedding invisible text layer…"),
+                (80, "Optimising file size…"),
+            ]
 
             def render_progress(pct: int, label: str):
                 prog_slot.markdown(f"""
@@ -612,51 +451,46 @@ if uploaded_file:
             start = time.time()
 
             try:
-                import traceback
+                import threading
 
-                # ── Step 1: analyse ───────────────────────────────────────
-                render_progress(15, "Analysing PDF structure…")
+                ocr_done  = threading.Event()
+                ocr_error = [None]
 
-                # ── Build kwargs ──────────────────────────────────────────
-                # optimize=0  → skip image recompression (jbig2/pngquant absent on Cloud)
-                # force_ocr   → re-encode every page (use for fully scanned PDFs)
-                # skip_text   → only OCR pages without an existing text layer
-                #               NOTE: for a purely image PDF (no text layer at all)
-                #               skip_text still runs OCR — it only skips pages that
-                #               already have embedded text, which is correct behaviour.
-                kwargs = dict(
-                    language=language,
-                    optimize=0,
-                    progress_bar=False,
-                    deskew=deskew,
-                )
-                if ocr_mode == "force":
-                    kwargs["force_ocr"] = True
-                else:
-                    kwargs["skip_text"] = True
+                def run_ocr():
+                    try:
+                        ocrmypdf.ocr(
+                            input_path, ocr_path,
+                            deskew=deskew,
+                            optimize=optimize,
+                            force_ocr=force_ocr,
+                            language=language,
+                            progress_bar=False,
+                        )
+                    except Exception as e:
+                        ocr_error[0] = e
+                    finally:
+                        ocr_done.set()
 
-                # ── Step 2: run OCR (blocking — no threads) ───────────────
-                # Threading / multiprocessing nesting causes silent failures on
-                # Streamlit Cloud. ocrmypdf manages its own worker pool internally;
-                # calling it synchronously here is correct and reliable.
-                render_progress(30, "Running Tesseract OCR engine…")
+                t = threading.Thread(target=run_ocr, daemon=True)
+                t.start()
 
-                ocrmypdf.ocr(input_path, ocr_path, **kwargs)
+                # Tick through progress steps while OCR runs in background
+                for pct, label in OCR_STEPS:
+                    if ocr_done.is_set():
+                        break
+                    render_progress(pct, label)
+                    ocr_done.wait(timeout=2.8)
 
-                # Verify output was actually produced
-                if not os.path.exists(ocr_path) or os.path.getsize(ocr_path) == 0:
-                    raise RuntimeError(
-                        "ocrmypdf produced no output file. "
-                        "This usually means Tesseract or Ghostscript is not installed "
-                        "on the server. Check that 'packages.txt' contains: "
-                        "tesseract-ocr, ghostscript, tesseract-ocr-eng"
-                    )
+                # Block until OCR truly done
+                ocr_done.wait()
 
-                render_progress(75, "Embedding invisible text layer…")
+                if ocr_error[0]:
+                    raise ocr_error[0]
 
-                # ── Step 3: stamp ─────────────────────────────────────────
+                # Step: stamp pages
                 render_progress(88, "Stamping pages with attribution…")
                 stamped_ok = add_stamp_to_pdf(ocr_path, stamped_path)
+                time.sleep(0.25)
 
                 render_progress(100, "Complete ✓")
                 elapsed = round(time.time() - start, 1)
@@ -665,33 +499,22 @@ if uploaded_file:
                 with open(final_file, "rb") as out_f:
                     pdf_bytes = out_f.read()
 
-                output_size_kb = len(pdf_bytes) / 1024
-                ratio = output_size_kb / input_size_kb if input_size_kb > 0 else 1.0
-                size_str = (
-                    f"{output_size_kb:.0f} KB"
-                    if output_size_kb < 1024
-                    else f"{output_size_kb/1024:.1f} MB"
-                )
-                ratio_note = (
-                    f"  ·  {ratio:.1f}× input size" if ratio > 1.15
-                    else f"  ·  {ratio:.0%} of input size"
-                )
-                stamp_note = "  ·  pages stamped ✓" if stamped_ok else ""
-
+                size_kb = round(len(pdf_bytes) / 1024, 1)
+                stamp_note = " · pages stamped" if stamped_ok else ""
                 status_slot.success(
-                    f"✅  OCR complete in {elapsed}s  ·  {size_str}{ratio_note}{stamp_note}"
+                    f"✅  OCR complete in {elapsed}s — {size_kb} KB{stamp_note}"
                 )
 
                 fire_ga_event("ocr_success", {
                     "language": language,
                     "processing_time_s": elapsed,
-                    "output_size_kb": round(output_size_kb, 1),
-                    "size_ratio": round(ratio, 2),
+                    "output_size_kb": size_kb,
                     "file_name": uploaded_file.name,
                 })
 
                 out_filename = f"{os.path.splitext(uploaded_file.name)[0]}_ocr.pdf"
 
+                # Manual download button (always visible as fallback)
                 st.download_button(
                     label="⬇  Download OCR PDF",
                     data=pdf_bytes,
@@ -699,24 +522,24 @@ if uploaded_file:
                     mime="application/pdf",
                 )
 
-                # Auto-download via JS blob URL
+                # ── Auto-download via JavaScript ─────────────────────────────
                 import base64
                 b64 = base64.b64encode(pdf_bytes).decode()
                 components.html(f"""
                 <script>
                 (function() {{
                   try {{
-                    var bytes = Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0));
-                    var url   = URL.createObjectURL(new Blob([bytes], {{type: 'application/pdf'}}));
-                    var a     = document.createElement('a');
-                    a.href    = url;
+                    var blob = Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0));
+                    var url  = URL.createObjectURL(new Blob([blob], {{type: 'application/pdf'}}));
+                    var a    = document.createElement('a');
+                    a.href  = url;
                     a.download = '{out_filename}';
                     document.body.appendChild(a);
                     a.click();
                     setTimeout(function() {{
                       URL.revokeObjectURL(url);
                       document.body.removeChild(a);
-                    }}, 1500);
+                    }}, 1000);
                   }} catch(e) {{
                     console.warn('Auto-download failed:', e);
                   }}
@@ -730,11 +553,8 @@ if uploaded_file:
                 fire_ga_event("ocr_failed", {"reason": "encrypted_pdf"})
             except Exception as e:
                 prog_slot.empty()
-                tb = traceback.format_exc()
                 st.error(f"❌  OCR failed: {e}")
-                with st.expander("Show error details (helpful for debugging)"):
-                    st.code(tb, language="text")
-                fire_ga_event("ocr_failed", {"reason": str(e)[:120]})
+                fire_ga_event("ocr_failed", {"reason": str(e)[:100]})
 else:
     st.info("☝️  Upload a PDF above to get started.")
 
