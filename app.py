@@ -14,7 +14,7 @@ st.set_page_config(
 
 # ── Google Analytics 4 ───────────────────────────────────────────────────────
 # Replace G-XXXXXXXXXX with your actual GA4 Measurement ID
-GA_MEASUREMENT_ID = "G-XXXXXXXXXX"
+GA_MEASUREMENT_ID = "G-F92P8BWS9F"
 
 components.html(f"""
 <!-- Google tag (gtag.js) -->
