@@ -13,8 +13,7 @@ st.set_page_config(
 )
 
 # ── Google Analytics 4 ───────────────────────────────────────────────────────
-GA_MEASUREMENT_ID = "G-F92P8BWS9F"
-
+GA_MEASUREMENT_ID = "G-XXXXXXXXXX"
 
 components.html(f"""
 <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
@@ -56,83 +55,43 @@ def fire_ga_event(event_name: str, params: dict = {}):
 
 def add_stamp_to_pdf(input_path: str, output_path: str) -> bool:
     """
-    Stamp 'Made OCR friendly by Rakshit Dwaram' at the bottom-right of every page.
-
-    Uses pikepdf ONLY — pikepdf is a hard dependency of ocrmypdf so it is
-    ALWAYS available on Streamlit Cloud and any environment where ocrmypdf runs.
-    No reportlab required.
+    Stamp the footer 'Made OCR friendly by Rakshit Dwaram' on every page.
+    Uses pypdf + reportlab. Falls back (copies file) if libraries are missing.
     """
     try:
-        import pikepdf
-        from pikepdf import Pdf, Dictionary, Name, Array
+        from pypdf import PdfReader, PdfWriter
+        from reportlab.pdfgen import canvas as rl_canvas
+        from reportlab.lib.colors import Color
+        import io
 
-        STAMP_TEXT = "Made OCR friendly by Rakshit Dwaram"
-        # Helvetica character width at 7 pt ≈ 4.2 pts per character (conservative)
-        TEXT_WIDTH_APPROX = len(STAMP_TEXT) * 4.2
-        FONT_SIZE = 7
-        MARGIN = 8  # pts from right / bottom edge
+        reader = PdfReader(input_path)
+        writer = PdfWriter()
+        stamp_text = "Made OCR friendly by Rakshit Dwaram"
 
-        pdf = Pdf.open(input_path)
-        p=1
+        for page in reader.pages:
+            pw = float(page.mediabox.width)
+            ph = float(page.mediabox.height)
 
-        for page in pdf.pages:
-            mediabox = page.mediabox
-            pw = float(mediabox[2])
+            packet = io.BytesIO()
+            c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
+            c.setFillColor(Color(0.23, 0.54, 0.25, alpha=0.6))
+            c.setFont("Helvetica", 7)
+            c.drawRightString(pw - 10, 6, stamp_text)
+            c.save()
+            packet.seek(0)
 
-            x = pw - TEXT_WIDTH_APPROX - MARGIN
-            y = 5.0
+            from pypdf import PdfReader as _PR
+            stamp_page = _PR(packet).pages[0]
+            page.merge_page(stamp_page)
+            writer.add_page(page)
 
-            # PDF content stream: save state, set green colour, draw text, restore
-            content = (
-                f"q "
-                f"BT "
-                f"/Stamp_F1 {FONT_SIZE} Tf "
-                f"0.23 0.54 0.25 rg "
-                f"{x:.2f} {y:.2f} Td "
-                f"({STAMP_TEXT}) Tj "
-                f"ET "
-                f"Q\n"
-            ).encode("latin-1")
-
-            # ── Ensure /Resources/Font contains our font ──────────────────
-            if "/Resources" not in page:
-                page["/Resources"] = Dictionary()
-
-            res = page["/Resources"]
-
-            if "/Font" not in res:
-                res["/Font"] = Dictionary()
-
-            fonts = res["/Font"]
-
-            if "/Stamp_F1" not in fonts:
-                fonts["/Stamp_F1"] = Dictionary(
-                    Type=Name("/Font"),
-                    Subtype=Name("/Type1"),
-                    BaseFont=Name("/Helvetica"),
-                    Encoding=Name("/WinAnsiEncoding"),
-                )
-
-            # ── Append stamp stream to page contents ─────────────────────
-            stamp_stream = pdf.make_stream(content)
-
-            if "/Contents" in page:
-                existing = page["/Contents"]
-                if isinstance(existing, pikepdf.Array):
-                    existing.append(stamp_stream)
-                    page["/Contents"] = existing
-                else:
-                    page["/Contents"] = Array([existing, stamp_stream])
-            else:
-                page["/Contents"] = stamp_stream
-
-        pdf.save(output_path)
+        with open(output_path, "wb") as f:
+            writer.write(f)
         return True
 
-    except Exception as e:
+    except Exception:
         import shutil
         shutil.copy(input_path, output_path)
-        st.warning(f"Stamping skipped ({e}). PDF is still fully OCR'd.")
         return False
 
 
@@ -143,6 +102,7 @@ st.markdown("""
 
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
+/* ── Light warm cream background ── */
 .stApp {
     background-color: #f5f2ed;
     background-image:
@@ -162,6 +122,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     margin: 2.5rem 0;
 }
 
+/* Hero */
 .hero-wrap { padding: 2.5rem 0 1rem 0; }
 .hero-eyebrow {
     font-family: 'Space Mono', monospace;
@@ -188,6 +149,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     line-height: 1.6;
 }
 
+/* Upload */
 [data-testid="stFileUploader"] {
     background: #eef5e8;
     border: 1.5px dashed #a8c8a0;
@@ -197,6 +159,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 }
 [data-testid="stFileUploader"]:hover { border-color: #3a8a40; }
 
+/* Options card */
 .options-card {
     background: #eef5e8;
     border: 1px solid #b8d4b0;
@@ -215,6 +178,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
 label { color: #4a5e48 !important; font-size: 0.88rem !important; }
 
+/* Buttons */
 .stButton > button {
     background: #3a8a40 !important;
     color: #ffffff !important;
@@ -243,9 +207,10 @@ label { color: #4a5e48 !important; font-size: 0.88rem !important; }
 }
 .stDownloadButton > button:hover { background: #3a8a4015 !important; }
 
-.stSuccess, .stError, .stInfo, .stWarning { border-radius: 8px !important; }
+.stSuccess, .stError, .stInfo { border-radius: 8px !important; }
 .stSpinner > div { color: #3a8a40 !important; }
 
+/* ── Progress bar ── */
 .prog-wrap { margin: 1.2rem 0 0.5rem; }
 .prog-header {
     display: flex;
@@ -277,6 +242,7 @@ label { color: #4a5e48 !important; font-size: 0.88rem !important; }
     margin-top: 0.3rem;
 }
 
+/* Stamp notice */
 .stamp-notice {
     background: #eef5e8;
     border: 1px solid #b8d4b0;
@@ -290,6 +256,7 @@ label { color: #4a5e48 !important; font-size: 0.88rem !important; }
     margin-bottom: 1rem;
 }
 
+/* About */
 .about-wrap { margin-top: 1rem; }
 .about-eyebrow {
     font-family: 'Space Mono', monospace;
@@ -433,7 +400,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ── Stamp notice ──────────────────────────────────────────────────────────────
 st.markdown(
     '<div class="stamp-notice">'
-    '🖋&nbsp;  <strong>"Made OCR friendly by Rakshit Dwaram"</strong>'
+    '🖋&nbsp; Each page will be stamped: <strong>"Made OCR friendly by Rakshit Dwaram"</strong>'
     '</div>',
     unsafe_allow_html=True,
 )
@@ -455,6 +422,7 @@ if uploaded_file:
             with open(input_path, "wb") as f:
                 f.write(uploaded_file.read())
 
+            # ── Progress bar placeholders ────────────────────────────────────
             prog_slot   = st.empty()
             status_slot = st.empty()
 
@@ -506,20 +474,23 @@ if uploaded_file:
                 t = threading.Thread(target=run_ocr, daemon=True)
                 t.start()
 
+                # Tick through progress steps while OCR runs in background
                 for pct, label in OCR_STEPS:
                     if ocr_done.is_set():
                         break
                     render_progress(pct, label)
                     ocr_done.wait(timeout=2.8)
 
+                # Block until OCR truly done
                 ocr_done.wait()
 
                 if ocr_error[0]:
                     raise ocr_error[0]
 
+                # Step: stamp pages
                 render_progress(88, "Stamping pages with attribution…")
                 stamped_ok = add_stamp_to_pdf(ocr_path, stamped_path)
-                time.sleep(0.2)
+                time.sleep(0.25)
 
                 render_progress(100, "Complete ✓")
                 elapsed = round(time.time() - start, 1)
@@ -543,6 +514,7 @@ if uploaded_file:
 
                 out_filename = f"{os.path.splitext(uploaded_file.name)[0]}_ocr.pdf"
 
+                # Manual download button (always visible as fallback)
                 st.download_button(
                     label="⬇  Download OCR PDF",
                     data=pdf_bytes,
@@ -550,17 +522,17 @@ if uploaded_file:
                     mime="application/pdf",
                 )
 
-                # Auto-download
+                # ── Auto-download via JavaScript ─────────────────────────────
                 import base64
                 b64 = base64.b64encode(pdf_bytes).decode()
                 components.html(f"""
                 <script>
                 (function() {{
                   try {{
-                    var bytes = Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0));
-                    var url   = URL.createObjectURL(new Blob([bytes], {{type: 'application/pdf'}}));
-                    var a     = document.createElement('a');
-                    a.href    = url;
+                    var blob = Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0));
+                    var url  = URL.createObjectURL(new Blob([blob], {{type: 'application/pdf'}}));
+                    var a    = document.createElement('a');
+                    a.href  = url;
                     a.download = '{out_filename}';
                     document.body.appendChild(a);
                     a.click();
