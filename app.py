@@ -13,11 +13,9 @@ st.set_page_config(
 )
 
 # ── Google Analytics 4 ───────────────────────────────────────────────────────
-# Replace G-XXXXXXXXXX with your actual GA4 Measurement ID
 GA_MEASUREMENT_ID = "G-F92P8BWS9F"
 
 components.html(f"""
-<!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -27,38 +25,13 @@ components.html(f"""
     page_title: 'PDF OCR Converter',
     page_location: window.location.href,
   }});
-
-  // Helper: send a custom event to GA4 from inside the iframe to the parent
-  function trackEvent(eventName, params) {{
-    try {{
-      // Post message to parent window (Streamlit host)
-      window.parent.postMessage({{
-        type: 'ga_event',
-        eventName: eventName,
-        params: params
-      }}, '*');
-    }} catch(e) {{}}
-  }}
-
-  // Listen for event requests from Streamlit (via query param trick)
-  const urlParams = new URLSearchParams(window.location.search);
-  const gaEvent = urlParams.get('ga_event');
-  const gaParams = urlParams.get('ga_params');
-  if (gaEvent) {{
-    try {{
-      gtag('event', gaEvent, gaParams ? JSON.parse(decodeURIComponent(gaParams)) : {{}});
-    }} catch(e) {{}}
-  }}
 </script>
-
-<!-- Re-fire gtag in parent window so events register on the main page -->
 <script>
   (function() {{
     var s = window.parent.document.createElement('script');
     s.async = true;
     s.src = 'https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}';
     window.parent.document.head.appendChild(s);
-
     window.parent.dataLayer = window.parent.dataLayer || [];
     function parentGtag(){{ window.parent.dataLayer.push(arguments); }}
     parentGtag('js', new Date());
@@ -70,9 +43,7 @@ components.html(f"""
 
 
 def fire_ga_event(event_name: str, params: dict = {}):
-    """Fire a GA4 custom event by injecting a hidden component."""
-    import json, urllib.parse
-    encoded = urllib.parse.quote(json.dumps(params))
+    import json
     components.html(f"""
     <script>
       if (window.parent && window.parent.__gtag) {{
@@ -82,50 +53,76 @@ def fire_ga_event(event_name: str, params: dict = {}):
     """, height=0)
 
 
+def add_stamp_to_pdf(input_path: str, output_path: str) -> bool:
+    """
+    Stamp the footer 'Made OCR friendly by Rakshit Dwaram' on every page.
+    Uses pypdf + reportlab. Falls back (copies file) if libraries are missing.
+    """
+    try:
+        from pypdf import PdfReader, PdfWriter
+        from reportlab.pdfgen import canvas as rl_canvas
+        from reportlab.lib.colors import Color
+        import io
+
+        reader = PdfReader(input_path)
+        writer = PdfWriter()
+        stamp_text = "Made OCR friendly by Rakshit Dwaram"
+
+        for page in reader.pages:
+            pw = float(page.mediabox.width)
+            ph = float(page.mediabox.height)
+
+            packet = io.BytesIO()
+            c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
+            c.setFillColor(Color(0.23, 0.54, 0.25, alpha=0.6))
+            c.setFont("Helvetica", 7)
+            c.drawRightString(pw - 10, 6, stamp_text)
+            c.save()
+            packet.seek(0)
+
+            from pypdf import PdfReader as _PR
+            stamp_page = _PR(packet).pages[0]
+            page.merge_page(stamp_page)
+            writer.add_page(page)
+
+        with open(output_path, "wb") as f:
+            writer.write(f)
+        return True
+
+    except Exception:
+        import shutil
+        shutil.copy(input_path, output_path)
+        return False
+
+
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
-}
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
-/* ── Background: dark with subtle green-tinted grid & glow ── */
+/* ── Light warm cream background ── */
 .stApp {
-    background-color: #0a0c0f;
+    background-color: #f5f2ed;
     background-image:
-        radial-gradient(ellipse 80% 50% at 20% -10%, #0f2a1a33 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 80% 110%, #1a2f0f22 0%, transparent 55%),
-        repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 60px,
-            #ffffff04 60px,
-            #ffffff04 61px
-        ),
-        repeating-linear-gradient(
-            90deg,
-            transparent,
-            transparent 60px,
-            #ffffff03 60px,
-            #ffffff03 61px
-        );
-    color: #e8e4dc;
+        radial-gradient(ellipse 80% 50% at 20% -10%, #d6e8c833 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 110%, #c8dab022 0%, transparent 55%),
+        repeating-linear-gradient(0deg, transparent, transparent 60px, #00000006 60px, #00000006 61px),
+        repeating-linear-gradient(90deg, transparent, transparent 60px, #00000005 60px, #00000005 61px);
+    color: #1a2015;
     min-height: 100vh;
 }
 
-/* Hide default Streamlit chrome */
-#MainMenu, footer, header {visibility: hidden;}
+#MainMenu, footer, header { visibility: hidden; }
 
-/* ── Divider ── */
 .section-divider {
     border: none;
-    border-top: 1px solid #1a2a1e;
+    border-top: 1px solid #c8d8c0;
     margin: 2.5rem 0;
 }
 
-/* ── Hero ── */
+/* Hero */
 .hero-wrap { padding: 2.5rem 0 1rem 0; }
 .hero-eyebrow {
     font-family: 'Space Mono', monospace;
@@ -140,33 +137,32 @@ html, body, [class*="css"] {
     font-size: 2.8rem;
     font-weight: 700;
     letter-spacing: -1.5px;
-    color: #e8e4dc;
+    color: #1a2015;
     line-height: 1.1;
     margin-bottom: 0.5rem;
 }
-.hero-accent { color: #7ec850; }
+.hero-accent { color: #3a8a40; }
 .hero-sub {
     font-size: 1rem;
-    color: #5a5e56;
-    margin-bottom: 0;
+    color: #6a7a65;
     font-weight: 300;
     line-height: 1.6;
 }
 
-/* ── Upload box ── */
+/* Upload */
 [data-testid="stFileUploader"] {
-    background: #0f1612;
-    border: 1.5px dashed #1e3326;
+    background: #eef5e8;
+    border: 1.5px dashed #a8c8a0;
     border-radius: 10px;
     padding: 1.2rem;
     transition: border-color 0.25s;
 }
-[data-testid="stFileUploader"]:hover { border-color: #7ec850; }
+[data-testid="stFileUploader"]:hover { border-color: #3a8a40; }
 
-/* ── Options card ── */
+/* Options card */
 .options-card {
-    background: #0d1410;
-    border: 1px solid #1a2a1e;
+    background: #eef5e8;
+    border: 1px solid #b8d4b0;
     border-radius: 10px;
     padding: 1.2rem 1.5rem;
     margin: 1.2rem 0;
@@ -176,17 +172,16 @@ html, body, [class*="css"] {
     font-size: 0.65rem;
     letter-spacing: 2.5px;
     text-transform: uppercase;
-    color: #3a5a40;
+    color: #4a7c59;
     margin-bottom: 1rem;
 }
 
-/* Selectbox / checkbox labels */
-label { color: #8a9e8e !important; font-size: 0.88rem !important; }
+label { color: #4a5e48 !important; font-size: 0.88rem !important; }
 
-/* ── Buttons ── */
+/* Buttons */
 .stButton > button {
-    background: #7ec850 !important;
-    color: #070e09 !important;
+    background: #3a8a40 !important;
+    color: #ffffff !important;
     font-family: 'Space Mono', monospace !important;
     font-weight: 700 !important;
     font-size: 0.82rem !important;
@@ -199,11 +194,10 @@ label { color: #8a9e8e !important; font-size: 0.88rem !important; }
 }
 .stButton > button:hover { opacity: 0.88 !important; transform: translateY(-1px) !important; }
 
-/* ── Download button ── */
 .stDownloadButton > button {
     background: transparent !important;
-    color: #7ec850 !important;
-    border: 1.5px solid #7ec850 !important;
+    color: #3a8a40 !important;
+    border: 1.5px solid #3a8a40 !important;
     font-family: 'Space Mono', monospace !important;
     font-weight: 700 !important;
     font-size: 0.82rem !important;
@@ -211,13 +205,58 @@ label { color: #8a9e8e !important; font-size: 0.88rem !important; }
     width: 100% !important;
     padding: 0.65rem 2rem !important;
 }
-.stDownloadButton > button:hover { background: #7ec85018 !important; }
+.stDownloadButton > button:hover { background: #3a8a4015 !important; }
 
-/* ── Alerts ── */
 .stSuccess, .stError, .stInfo { border-radius: 8px !important; }
-.stSpinner > div { color: #7ec850 !important; }
+.stSpinner > div { color: #3a8a40 !important; }
 
-/* ── About Me ── */
+/* ── Progress bar ── */
+.prog-wrap { margin: 1.2rem 0 0.5rem; }
+.prog-header {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.63rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #4a7c59;
+    margin-bottom: 0.45rem;
+}
+.prog-track {
+    background: #d4e8cc;
+    border-radius: 99px;
+    height: 10px;
+    overflow: hidden;
+}
+.prog-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3a8a40 0%, #7ec850 100%);
+    border-radius: 99px;
+    transition: width 0.5s cubic-bezier(.4,0,.2,1);
+}
+.prog-step {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    color: #8aaa85;
+    letter-spacing: 1px;
+    margin-top: 0.3rem;
+}
+
+/* Stamp notice */
+.stamp-notice {
+    background: #eef5e8;
+    border: 1px solid #b8d4b0;
+    border-left: 3px solid #7ec850;
+    border-radius: 0 8px 8px 0;
+    padding: 0.6rem 1rem;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    color: #4a7c59;
+    letter-spacing: 1px;
+    margin-bottom: 1rem;
+}
+
+/* About */
 .about-wrap { margin-top: 1rem; }
 .about-eyebrow {
     font-family: 'Space Mono', monospace;
@@ -228,9 +267,9 @@ label { color: #8a9e8e !important; font-size: 0.88rem !important; }
     margin-bottom: 1.2rem;
 }
 .about-card {
-    background: #0d1410;
-    border: 1px solid #1a2a1e;
-    border-left: 3px solid #7ec850;
+    background: #eef5e8;
+    border: 1px solid #b8d4b0;
+    border-left: 3px solid #3a8a40;
     border-radius: 0 10px 10px 0;
     padding: 1.8rem 2rem;
 }
@@ -238,31 +277,30 @@ label { color: #8a9e8e !important; font-size: 0.88rem !important; }
     font-family: 'Space Mono', monospace;
     font-size: 1.25rem;
     font-weight: 700;
-    color: #e8e4dc;
+    color: #1a2015;
     margin-bottom: 0.15rem;
 }
 .about-title-tag {
     font-size: 0.78rem;
-    color: #7ec850;
+    color: #3a8a40;
     font-family: 'Space Mono', monospace;
     letter-spacing: 1px;
     margin-bottom: 1.4rem;
 }
 .about-body {
     font-size: 0.92rem;
-    color: #7a8a7e;
+    color: #4a5e48;
     line-height: 1.85;
     font-weight: 300;
 }
 .about-body p { margin-bottom: 1rem; }
 .about-body p:last-child { margin-bottom: 0; }
-.about-highlight { color: #b0d490; font-weight: 400; }
+.about-highlight { color: #2a6e30; font-weight: 400; }
 
-/* ── Footer ── */
 .footer-tag {
     font-family: 'Space Mono', monospace;
     font-size: 0.6rem;
-    color: #1e2e22;
+    color: #a8c0a0;
     text-align: center;
     margin-top: 3rem;
     padding-bottom: 1.5rem;
@@ -271,12 +309,13 @@ label { color: #8a9e8e !important; font-size: 0.88rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Hero ──────────────────────────────────────────────────────────────────────
+# ── Hero ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero-wrap">
     <div class="hero-eyebrow">Legal Tech Tool</div>
     <div class="hero-title">PDF <span class="hero-accent">OCR</span><br>Converter</div>
-    <div class="hero-sub">Turn scanned &amp; unreadable PDFs into fully searchable documents.<br>Free to use — built for law students.</div>
+    <div class="hero-sub">Turn scanned &amp; unreadable PDFs into fully searchable documents.<br>
+    Free to use — built for law students.</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -313,9 +352,7 @@ st.markdown("""
                 at the <span class="about-highlight">intersection of law and technology</span>, focusing on
                 practical tools that improve access and usability.
             </p>
-            </p>
-            <p>contact me : rakshitdwaram@gmail.com
-            </p>
+            <p>contact me: rakshitdwaram@gmail.com</p>
         </div>
     </div>
 </div>
@@ -355,14 +392,22 @@ with col2:
         format_func=lambda x: {0: "None", 1: "Balanced (recommended)", 2: "High", 3: "Maximum"}[x],
         index=1,
     )
-    force_ocr = st.checkbox("Force OCR on all pages", value=True, help="Re-OCR every page, even if it already has a text layer")
+    force_ocr = st.checkbox("Force OCR on all pages", value=True,
+                            help="Re-OCR every page, even if it already has a text layer")
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+# ── Stamp notice ──────────────────────────────────────────────────────────────
+st.markdown(
+    '<div class="stamp-notice">'
+    '🖋&nbsp; Each page will be stamped: <strong>"Made OCR friendly by Rakshit Dwaram"</strong>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
 # ── Run OCR ───────────────────────────────────────────────────────────────────
 if uploaded_file:
     if st.button("🔍  Run OCR"):
-        # Track: user clicked Run OCR
         fire_ga_event("ocr_started", {
             "language": language,
             "file_name": uploaded_file.name,
@@ -370,58 +415,151 @@ if uploaded_file:
         })
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = os.path.join(tmpdir, "input.pdf")
-            output_path = os.path.join(tmpdir, "output_ocr.pdf")
+            input_path   = os.path.join(tmpdir, "input.pdf")
+            ocr_path     = os.path.join(tmpdir, "output_ocr.pdf")
+            stamped_path = os.path.join(tmpdir, "output_stamped.pdf")
 
             with open(input_path, "wb") as f:
                 f.write(uploaded_file.read())
 
+            # ── Progress bar placeholders ────────────────────────────────────
+            prog_slot   = st.empty()
+            status_slot = st.empty()
+
+            OCR_STEPS = [
+                (8,  "Analysing PDF structure…"),
+                (20, "Preprocessing pages…"),
+                (40, "Running Tesseract OCR engine…"),
+                (65, "Embedding invisible text layer…"),
+                (80, "Optimising file size…"),
+            ]
+
+            def render_progress(pct: int, label: str):
+                prog_slot.markdown(f"""
+                <div class="prog-wrap">
+                  <div class="prog-header">
+                    <span>OCR Progress</span><span>{pct}%</span>
+                  </div>
+                  <div class="prog-track">
+                    <div class="prog-fill" style="width:{pct}%"></div>
+                  </div>
+                  <div class="prog-step">{label}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            render_progress(0, "Starting…")
             start = time.time()
-            with st.spinner("Running OCR — this may take a moment for large files…"):
-                try:
-                    ocrmypdf.ocr(
-                        input_path,
-                        output_path,
-                        deskew=deskew,
-                        optimize=optimize,
-                        force_ocr=force_ocr,
-                        language=language,
-                        progress_bar=False,
-                    )
-                    elapsed = round(time.time() - start, 1)
 
-                    with open(output_path, "rb") as out_f:
-                        pdf_bytes = out_f.read()
+            try:
+                import threading
 
-                    size_kb = round(len(pdf_bytes) / 1024, 1)
-                    st.success(f"✅  OCR complete in {elapsed}s — output size: {size_kb} KB")
+                ocr_done  = threading.Event()
+                ocr_error = [None]
 
-                    # Track: successful conversion
-                    fire_ga_event("ocr_success", {
-                        "language": language,
-                        "processing_time_s": elapsed,
-                        "output_size_kb": size_kb,
-                        "file_name": uploaded_file.name,
-                    })
+                def run_ocr():
+                    try:
+                        ocrmypdf.ocr(
+                            input_path, ocr_path,
+                            deskew=deskew,
+                            optimize=optimize,
+                            force_ocr=force_ocr,
+                            language=language,
+                            progress_bar=False,
+                        )
+                    except Exception as e:
+                        ocr_error[0] = e
+                    finally:
+                        ocr_done.set()
 
-                    st.download_button(
-                        label="⬇  Download OCR PDF",
-                        data=pdf_bytes,
-                        file_name=f"{os.path.splitext(uploaded_file.name)[0]}_ocr.pdf",
-                        mime="application/pdf",
-                    )
+                t = threading.Thread(target=run_ocr, daemon=True)
+                t.start()
 
-                except ocrmypdf.exceptions.EncryptedPdfError:
-                    st.error("🔒  The PDF is password-protected. Please decrypt it first.")
-                    fire_ga_event("ocr_failed", {"reason": "encrypted_pdf"})
-                except Exception as e:
-                    st.error(f"❌  OCR failed: {e}")
-                    fire_ga_event("ocr_failed", {"reason": str(e)[:100]})
+                # Tick through progress steps while OCR runs in background
+                for pct, label in OCR_STEPS:
+                    if ocr_done.is_set():
+                        break
+                    render_progress(pct, label)
+                    ocr_done.wait(timeout=2.8)
+
+                # Block until OCR truly done
+                ocr_done.wait()
+
+                if ocr_error[0]:
+                    raise ocr_error[0]
+
+                # Step: stamp pages
+                render_progress(88, "Stamping pages with attribution…")
+                stamped_ok = add_stamp_to_pdf(ocr_path, stamped_path)
+                time.sleep(0.25)
+
+                render_progress(100, "Complete ✓")
+                elapsed = round(time.time() - start, 1)
+
+                final_file = stamped_path if stamped_ok else ocr_path
+                with open(final_file, "rb") as out_f:
+                    pdf_bytes = out_f.read()
+
+                size_kb = round(len(pdf_bytes) / 1024, 1)
+                stamp_note = " · pages stamped" if stamped_ok else ""
+                status_slot.success(
+                    f"✅  OCR complete in {elapsed}s — {size_kb} KB{stamp_note}"
+                )
+
+                fire_ga_event("ocr_success", {
+                    "language": language,
+                    "processing_time_s": elapsed,
+                    "output_size_kb": size_kb,
+                    "file_name": uploaded_file.name,
+                })
+
+                out_filename = f"{os.path.splitext(uploaded_file.name)[0]}_ocr.pdf"
+
+                # Manual download button (always visible as fallback)
+                st.download_button(
+                    label="⬇  Download OCR PDF",
+                    data=pdf_bytes,
+                    file_name=out_filename,
+                    mime="application/pdf",
+                )
+
+                # ── Auto-download via JavaScript ─────────────────────────────
+                import base64
+                b64 = base64.b64encode(pdf_bytes).decode()
+                components.html(f"""
+                <script>
+                (function() {{
+                  try {{
+                    var blob = Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0));
+                    var url  = URL.createObjectURL(new Blob([blob], {{type: 'application/pdf'}}));
+                    var a    = document.createElement('a');
+                    a.href  = url;
+                    a.download = '{out_filename}';
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(function() {{
+                      URL.revokeObjectURL(url);
+                      document.body.removeChild(a);
+                    }}, 1000);
+                  }} catch(e) {{
+                    console.warn('Auto-download failed:', e);
+                  }}
+                }})();
+                </script>
+                """, height=0)
+
+            except ocrmypdf.exceptions.EncryptedPdfError:
+                prog_slot.empty()
+                st.error("🔒  The PDF is password-protected. Please decrypt it first.")
+                fire_ga_event("ocr_failed", {"reason": "encrypted_pdf"})
+            except Exception as e:
+                prog_slot.empty()
+                st.error(f"❌  OCR failed: {e}")
+                fire_ga_event("ocr_failed", {"reason": str(e)[:100]})
 else:
     st.info("☝️  Upload a PDF above to get started.")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown(
     '<div class="footer-tag">POWERED BY OCRMYPDF + TESSERACT &nbsp;·&nbsp; BUILT BY RAKSHIT DWARAM</div>',
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
