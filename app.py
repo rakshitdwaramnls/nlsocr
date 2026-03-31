@@ -400,7 +400,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ── Stamp notice ──────────────────────────────────────────────────────────────
 st.markdown(
     '<div class="stamp-notice">'
-    '🖋&nbsp; Each page will be stamped: <strong>"Made OCR friendly by Rakshit Dwaram"</strong>'
+    '🖋&nbsp;"Made OCR friendly by Rakshit Dwaram"</strong>'
     '</div>',
     unsafe_allow_html=True,
 )
